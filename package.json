@@ -1,0 +1,40 @@
+{
+  "name": "fiyofeed",
+  "version": "1.0.0",
+  "description": "Flexiyo User Micro Service",
+  "keywords": [
+    "Flexiyo",
+    "fiyofeed",
+    "microservice"
+  ],
+  "homepage": "https://github.com/flexiyo/fiyofeed#readme",
+  "bugs": {
+    "url": "https://github.com/flexiyo/fiyofeed/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flexiyo/fiyofeed.git"
+  },
+  "license": "ISC",
+  "author": "Kaushal Krishna",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.12.6",
+    "@grpc/proto-loader": "^0.7.13",
+    "axios": "^1.8.1",
+    "bcrypt": "^5.1.1",
+    "cassandra-driver": "^4.8.0",
+    "dotenv": "^16.4.7",
+    "ioredis": "^5.6.0",
+    "postgres": "^3.4.5",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}

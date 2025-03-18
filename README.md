@@ -1,4 +1,3 @@
-# fiyouser
-
-Flexiyo User Service
 # fiyofeed
+
+Flexiyo Feed Service
