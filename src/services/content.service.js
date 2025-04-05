@@ -18,6 +18,7 @@ const contentService = {
       return callback(null, {
         ...GrpcResponse.success("Content found."),
         content,
+        table_name,
       });
     } catch (error) {
       console.error("Error in GetContent:", error);
@@ -33,6 +34,7 @@ const contentService = {
       return callback(null, {
         ...GrpcResponse.success("Content found."),
         contents,
+        table_name,
       });
     } catch (error) {
       console.error("Error in GetUserContents:", error);
@@ -58,7 +60,11 @@ const contentService = {
         VALUES (${contentId}, ${req_user_id}, ${media_key}, ${collabs}, ${caption}, ${hashtags}, ${track})
       `;
 
-      return callback(null, GrpcResponse.success("Content created."));
+      return callback(null, {
+        ...GrpcResponse.success("Content created."),
+        content_id: contentId,
+        table_name,
+      });
     } catch (error) {
       console.error("Error in CreateContent:", error);
       return callback(GrpcResponse.error("Error in CreateContent."));
@@ -86,6 +92,7 @@ const contentService = {
       return callback(null, {
         ...GrpcResponse.success("Content updated."),
         updated_fields,
+        table_name,
       });
     } catch (error) {
       console.error("Error in UpdateContent:", error);
@@ -98,7 +105,7 @@ const contentService = {
 
       await sql`DELETE FROM ${table_name} WHERE id = ${content_id} AND user_id = ${req_user_id}`;
 
-      return callback(null, GrpcResponse.success("${table_name} deleted."));
+      return callback(null, GrpcResponse.success("Content deleted."));
     } catch (error) {
       console.error("Error in DeleteContent:", error);
       return callback(GrpcResponse.error("Error in DeleteContent."));
