@@ -1,10 +1,5 @@
-import { cql, rdb, sql } from "../db/index.js";
+import { sql, rdb } from "../db/index.js";
 
-/**
- * Fetches and organizes user context data for feed personalization
- * @param {string} userId - The user ID to fetch context for
- * @returns {Object} Structured user context data
- */
 async function getUserContext(userId) {
   const [mates, follows, interests, interactions] = await Promise.all([
     sql`
@@ -13,7 +8,7 @@ async function getUserContext(userId) {
       (SELECT matee_id AS id FROM mates WHERE mater_id = ${userId})
     `,
     sql`SELECT followee_id FROM followers WHERE follower_id = ${userId}`,
-    cql`SELECT interest_tags FROM users_by_id WHERE id = ${userId}`,
+    sql`SELECT interests FROM users WHERE id = ${userId}`,
     sql`
       SELECT content_id, content_type, action_type, created_at 
       FROM user_interactions 
@@ -22,7 +17,6 @@ async function getUserContext(userId) {
     `,
   ]);
 
-  // Organize interactions by type for easier access
   const interactionsByType = {};
   interactions.forEach((item) => {
     if (!interactionsByType[item.action_type]) {
@@ -31,7 +25,10 @@ async function getUserContext(userId) {
     interactionsByType[item.action_type].add(item.content_id);
   });
 
-  // Find creators whose content the user has liked
+  Object.keys(interactionsByType).forEach((key) => {
+    interactionsByType[key] = [...interactionsByType[key]];
+  });
+
   const likedCreators = new Set();
   const interactedContent = interactions.filter(
     (item) => item.action_type === "like"
@@ -51,7 +48,7 @@ async function getUserContext(userId) {
       if (typeIds.length > 0) {
         const tableName = type === "clips" ? "clips" : "posts";
         const creators = await sql`
-          SELECT DISTINCT user_id FROM ${sql(tableName)}
+          SELECT DISTINCT user_id FROM ${tableName}
           WHERE id = ANY(${typeIds})
         `;
 
@@ -75,12 +72,6 @@ async function getUserContext(userId) {
   };
 }
 
-/**
- * Identifies trending hashtags within a user's network
- * @param {Array} networkIds - IDs of users in the user's network
- * @param {number} timeframe - Number of days to look back
- * @returns {Array} List of trending hashtags
- */
 async function getTrendingTags(networkIds, timeframe = 7) {
   if (!networkIds.length) return [];
 
@@ -100,15 +91,16 @@ async function getTrendingTags(networkIds, timeframe = 7) {
 
   const tagQueries = [];
   if (postIds.length > 0) {
-    tagQueries.push(cql`SELECT hashtags FROM posts WHERE id IN ${postIds}`);
+    tagQueries.push(
+      sql`SELECT hashtags FROM posts WHERE id =  ANY(${postIds})`
+    );
   }
   if (clipIds.length > 0) {
-    tagQueries.push(cql`SELECT hashtags FROM clips WHERE id IN ${clipIds}`);
+    tagQueries.push(sql`SELECT hashtags FROM clips WHERE id = ANY(${clipIds})`);
   }
 
   const tagResults = (await Promise.all(tagQueries)).flat();
 
-  // Count tag occurrences
   const tagCounts = {};
   tagResults.forEach((result) => {
     if (result?.hashtags) {
@@ -125,20 +117,13 @@ async function getTrendingTags(networkIds, timeframe = 7) {
     .map((item) => item.tag);
 }
 
-/**
- * Fetches content based on the provided strategy
- * @param {string} tableName - Type of content ("posts" or "clips")
- * @param {Object} strategy - Strategy object with filtering parameters
- * @param {number} limit - Maximum number of items to fetch
- * @returns {Array} Content items matching the strategy
- */
 async function fetchContent(tableName, strategy, limit = 20) {
   const { userIds, tags, sortBy, timeframe = 7 } = strategy;
 
   if (userIds && userIds.length > 0) {
     return sql`
       SELECT id, user_id, created_at 
-      FROM ${sql(tableName)} 
+      FROM ${tableName} 
       WHERE user_id = ANY(${userIds})
       AND created_at > NOW() - INTERVAL '${sql(timeframe)} days' 
       LIMIT ${limit}
@@ -147,8 +132,8 @@ async function fetchContent(tableName, strategy, limit = 20) {
 
   if (tags && tags.length > 0) {
     const timestamp = Date.now() - timeframe * 24 * 60 * 60 * 1000;
-    const taggedIds = await cql`
-      SELECT id FROM ${cql(tableName)} 
+    const taggedIds = await sql`
+      SELECT id FROM ${tableName} 
       WHERE hashtags && ${tags} 
       AND created_at > toTimestamp(${timestamp}) 
       LIMIT ${limit * 2}
@@ -159,7 +144,7 @@ async function fetchContent(tableName, strategy, limit = 20) {
     const ids = taggedIds.map((item) => item.id);
     return sql`
       SELECT id, user_id, created_at 
-      FROM ${sql(tableName)} 
+      FROM ${tableName} 
       WHERE id = ANY(${ids})
       LIMIT ${limit}
     `;
@@ -167,8 +152,8 @@ async function fetchContent(tableName, strategy, limit = 20) {
 
   if (sortBy === "popular") {
     const timestamp = Date.now() - timeframe * 24 * 60 * 60 * 1000;
-    const popularIds = await cql`
-      SELECT id FROM ${cql(tableName)} 
+    const popularIds = await sql`
+      SELECT id FROM ${tableName} 
       WHERE created_at > toTimestamp(${timestamp})
       ORDER BY likes_count DESC, comments_count DESC 
       LIMIT ${limit * 2}
@@ -179,7 +164,7 @@ async function fetchContent(tableName, strategy, limit = 20) {
     const ids = popularIds.map((item) => item.id);
     return sql`
       SELECT id, user_id, created_at 
-      FROM ${sql(tableName)} 
+      FROM ${tableName} 
       WHERE id = ANY(${ids})
       LIMIT ${limit}
     `;
@@ -187,26 +172,20 @@ async function fetchContent(tableName, strategy, limit = 20) {
 
   return sql`
     SELECT id, user_id, created_at 
-    FROM ${sql(tableName)} 
+    FROM ${tableName} 
     WHERE created_at > NOW() - INTERVAL '${sql(timeframe)} days'
     ORDER BY created_at DESC 
     LIMIT ${limit}
   `;
 }
 
-/**
- * Retrieves engagement metrics for a list of content items
- * @param {Array} contentIds - List of content IDs
- * @param {string} tableName - Type of content ("posts" or "clips")
- * @returns {Object} Map of content IDs to their metrics
- */
 async function getContentMetrics(contentIds, tableName) {
   if (!contentIds.length) return {};
 
-  const metrics = await cql`
+  const metrics = await sql`
     SELECT id, likes_count, comments_count, shares_count, hashtags
-    FROM ${cql(tableName)}
-    WHERE id IN ${contentIds}
+    FROM ${tableName}
+    WHERE id = ANY(${contentIds})
   `;
 
   return metrics.reduce((acc, item) => {
@@ -215,53 +194,38 @@ async function getContentMetrics(contentIds, tableName) {
   }, {});
 }
 
-/**
- * Calculates a relevance score for content based on user context
- * @param {Object} content - Content item to score
- * @param {Object} userContext - User context data
- * @param {Object} metrics - Content metrics data
- * @returns {number} Relevance score
- */
 function scoreContent(content, userContext, metrics) {
   const { mates, follows, interests, interactions, likedCreators } =
     userContext;
-
   const now = Date.now();
   const itemTime = new Date(content.created_at).getTime();
-
   let score = 0;
 
   score += content.strategyWeight || 0;
 
-  // Relationship boosts
   if (mates.includes(content.user_id)) score += 50;
   if (follows.includes(content.user_id)) score += 30;
-
   if (likedCreators.includes(content.user_id)) score += 20;
 
-  // Engagement metrics
   const itemMetrics = metrics[content.id] || {};
   score += (itemMetrics.likes_count || 0) * 2;
   score += (itemMetrics.comments_count || 0) * 3;
   score += (itemMetrics.shares_count || 0) * 4;
 
-  // Interest matching
   const itemTags = itemMetrics.hashtags || [];
   const interestMatches = itemTags.filter((tag) =>
     interests.includes(tag)
   ).length;
   score += interestMatches * 15;
 
-  // User interactions
-  if (interactions.hide && interactions.hide.has(content.id)) {
+  if (interactions.hide?.includes(content.id)) {
     score -= 1000;
   }
 
-  if (interactions.like && interactions.like.has(content.id)) {
+  if (interactions.like?.includes(content.id)) {
     score += 10;
   }
 
-  // Recency factor
   const hoursSinceCreation = (now - itemTime) / 3600000;
   const recency = Math.exp(-hoursSinceCreation / 48) * 100;
   score += recency;
@@ -269,28 +233,14 @@ function scoreContent(content, userContext, metrics) {
   return Math.max(0, score);
 }
 
-/**
- * Generates a personalized feed for a specific content type
- * @param {string} userId - The user ID to generate feed for
- * @param {string} tableName - Type of content ("posts" or "clips")
- * @returns {Array} List of content IDs for the feed
- */
 async function generateTypedFeed(userId, tableName) {
   const userContext = await getUserContext(userId);
   const { mates, follows, interests, networkIds } = userContext;
-
   const trendingTags = await getTrendingTags(networkIds);
-
-  // Define content retrieval strategies
   const strategies = [];
 
   if (mates.length > 0) {
-    strategies.push({
-      name: "mates",
-      userIds: mates,
-      weight: 50,
-      limit: 15,
-    });
+    strategies.push({ name: "mates", userIds: mates, weight: 50, limit: 15 });
   }
 
   if (follows.length > 0) {
@@ -335,15 +285,8 @@ async function generateTypedFeed(userId, tableName) {
     weight: 15,
     limit: 15,
   });
+  strategies.push({ name: "recent", sortBy: "recent", weight: 10, limit: 15 });
 
-  strategies.push({
-    name: "recent",
-    sortBy: "recent",
-    weight: 10,
-    limit: 15,
-  });
-
-  // Fetch content for each strategy
   const contentPromises = strategies.map((strategy) =>
     fetchContent(tableName, strategy, strategy.limit || 20).then((items) =>
       items.map((item) => ({
@@ -357,7 +300,6 @@ async function generateTypedFeed(userId, tableName) {
   const contentResults = await Promise.all(contentPromises);
   const allContent = contentResults.flat();
 
-  // Deduplicate content, keeping items with highest strategy weight
   const contentMap = new Map();
   allContent.forEach((item) => {
     if (
@@ -369,70 +311,52 @@ async function generateTypedFeed(userId, tableName) {
   });
 
   const uniqueContent = Array.from(contentMap.values());
-
-  // Get metrics for scoring
   const contentIds = uniqueContent.map((item) => item.id);
   const contentMetrics = await getContentMetrics(contentIds, tableName);
 
-  // Score and sort content
   const scoredContent = uniqueContent.map((item) => ({
     ...item,
     score: scoreContent(item, userContext, contentMetrics),
   }));
 
-  const validContent = scoredContent.filter((item) => item.score > 0);
-
-  return validContent
+  return scoredContent
+    .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, 20)
     .map((item) => item.id);
 }
 
-/**
- * Precomputes and caches a user's feed for faster retrieval
- * @param {string} userId - The user ID to precompute feed for
- * @param {string} tableName - Type of content ("posts" or "clips")
- * @returns {Array|undefined} List of content IDs or undefined if using cache
- */
 export async function precomputeFeed(userId, tableName) {
   if (tableName !== "posts" && tableName !== "clips") {
     throw new Error("Invalid content type. Must be 'posts' or 'clips'");
   }
 
   const cacheKey = `feed:${userId}:${tableName}`;
-  const cacheTime = 7200; // Cache for 2 hour
+  const cacheTime = 7200;
 
   try {
     const cachedFeed = await rdb("get", cacheKey);
+    const parsedFeed = cachedFeed ? JSON.parse(cachedFeed) : null;
     const cachedTimestamp = await rdb("get", `${cacheKey}:timestamp`);
-
     const now = Date.now();
 
     if (
-      cachedFeed &&
-      cachedFeed.length > 5 &&
+      parsedFeed &&
+      parsedFeed.length > 5 &&
       cachedTimestamp &&
-      now - cachedTimestamp < cacheTime * 1000
+      now - parseInt(cachedTimestamp) < cacheTime * 1000
     ) {
-      console.log(`Using cached ${tableName} feed for user ${userId}`);
-      return;
+      return parsedFeed;
     }
-
-    console.log(`Generating fresh ${tableName} feed for user ${userId}`);
 
     const contentIds = await generateTypedFeed(userId, tableName);
 
-    // Cache the results
     await Promise.all([
-      rdb("set", cacheKey, contentIds),
-      rdb("set", `${cacheKey}:timestamp`, now),
+      rdb("set", cacheKey, JSON.stringify(contentIds)),
+      rdb("set", `${cacheKey}:timestamp`, now.toString()),
       rdb("expire", cacheKey, cacheTime),
       rdb("expire", `${cacheKey}:timestamp`, cacheTime),
     ]);
-
-    console.log(
-      `Cached ${contentIds.length} ${tableName} items for user ${userId}`
-    );
 
     return contentIds;
   } catch (error) {
@@ -444,35 +368,38 @@ export async function precomputeFeed(userId, tableName) {
   }
 }
 
-export const getStarterFeed = async (userId, tableName) => {
+export async function getStarterFeed(userId, tableName) {
   try {
-    let contentIds = [];
-    if (tableName === 'posts' || tableName === 'clips') {
-      const trendingContent = await sql`
-        SELECT id FROM ${tableName}
-        ORDER BY created_at DESC, likes_count DESC, comments_count DESC
+    let contentIds;
+    if (tableName === "posts") {
+      const trendingPosts = await sql`
+        SELECT id FROM posts
+        ORDER BY created_at DESC
         LIMIT 20
       `;
-      
-      contentIds = trendingContent.map(content => content.id);
+      contentIds = trendingPosts.map((content) => content.id);
+    } else if (tableName === "clips") {
+      const trendingClips = await sql`
+        SELECT id FROM clips
+        ORDER BY created_at DESC
+        LIMIT 20
+      `;
+      contentIds = trendingClips.map((content) => content.id);
+    } else {
+      throw new Error(`Invalid table name: ${tableName}`);
     }
 
     const cacheKey = `feed:${userId}:${tableName}`;
-    const cacheTime = 7200; // Cache for 2 hour
+    const cacheTime = 7200;
 
     await Promise.all([
-      rdb("set", cacheKey, contentIds),
-      rdb("expire", cacheKey, cacheTime)
+      rdb("set", cacheKey, JSON.stringify(contentIds)),
+      rdb("expire", cacheKey, cacheTime),
     ]);
-    
-    console.log(`Generated and cached small ${tableName} feed for user ${userId}`);
 
     return contentIds;
   } catch (error) {
-    console.error(
-      `Error generating starter ${tableName} feed for user ${userId}:`,
-      error
-    );
+    console.error(`Error in getStarterFeed:`, error);
     throw error;
   }
-};
+}

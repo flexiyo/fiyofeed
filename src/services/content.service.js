@@ -1,7 +1,10 @@
 import { v4 as uuidv4 } from "uuid";
-import { cql, rdb, sql } from "../db/index.js";
+import { sql } from "../db/index.js";
 import { GrpcResponse } from "../utils/GrpcResponse.js";
-import { getContentById } from "../handlers/content.handler.js";
+import {
+  getContentById,
+  getContentsByUserId,
+} from "../handlers/content.handler.js";
 
 const contentService = {
   GetContent: async (call, callback) => {
@@ -10,13 +13,10 @@ const contentService = {
       const content = await getContentById(content_id, table_name);
 
       if (!content)
-        return callback(
-          null,
-          GrpcResponse.error(`${table_name.slice(0, -1)} not found."`)
-        );
+        return callback(null, GrpcResponse.error("Content not found."));
 
       return callback(null, {
-        ...GrpcResponse.success(`${table_name.slice(0, -1)} found.`),
+        ...GrpcResponse.success("Content found."),
         content,
       });
     } catch (error) {
@@ -24,17 +24,16 @@ const contentService = {
       return callback(GrpcResponse.error("Error in GetContent."));
     }
   },
-  GetUserContents : async (call, callback) => {
+  GetContents: async (call, callback) => {
     try {
-      const { user_id, table_name } = call.request;
+      const { content_ids, table_name } = call.request;
 
-      const contents = await getContentsByUserId(req_user_id, table_name);
+      const contents = await getContentsByUserId(content_ids, table_name);
 
       return callback(null, {
-        ...GrpcResponse.success(`${table_name.slice(0, -1)} found.`),
+        ...GrpcResponse.success("Content found."),
         contents,
       });
-
     } catch (error) {
       console.error("Error in GetUserContents:", error);
       return callback(GrpcResponse.error("Error in GetUserContents."));
@@ -47,7 +46,6 @@ const contentService = {
         media_key,
         collabs,
         caption,
-        description,
         hashtags,
         track,
         table_name,
@@ -56,13 +54,8 @@ const contentService = {
       const contentId = uuidv4();
 
       await sql`
-        INSERT INTO ${table_name} (id, user_id, media_key, collabs)
-        VALUES (${contentId}, ${req_user_id}, ${media_key}, ${collabs})
-      `;
-
-      await cql`
-        INSERT INTO ${table_name} (id, caption, description, hashtags, track)
-        VALUES (${contentId}, ${caption}, ${description}, ${hashtags}, ${track})
+        INSERT INTO ${table_name} (id, user_id, media_key, collabs, caption, hashtags, track)
+        VALUES (${contentId}, ${req_user_id}, ${media_key}, ${collabs}, ${caption}, ${hashtags}, ${track})
       `;
 
       return callback(null, GrpcResponse.success("Content created."));
@@ -76,27 +69,24 @@ const contentService = {
       const { req_user_id, content_id, table_name, updated_fields } =
         call.request;
 
-      const allowedSqlFields = ["collabs"];
+      const allowedFields = ["collabs", "caption", "hashtags"];
 
-      const allowedCqlFields = ["caption", "description", "hashtags"];
+      const fieldsToUpdate = Object.keys(updated_fields).filter((field) =>
+        allowedFields.includes(field)
+      );
 
       await sql`
         UPDATE ${table_name}
-        SET ${allowedSqlFields.map(
+        SET ${fieldsToUpdate.map(
           (field) => `${field} = ${updated_fields[field]}`
         )}
         WHERE id = ${content_id} AND user_id = ${req_user_id}
       `;
 
-      await cql`
-        UPDATE ${table_name}
-        SET ${allowedCqlFields.map(
-          (field) => `${field} = ${updated_fields[field]}`
-        )}
-        WHERE id = ${content_id}
-      `;
-
-      return callback(null, {...GrpcResponse.success("Content updated."), updated_fields});
+      return callback(null, {
+        ...GrpcResponse.success("Content updated."),
+        updated_fields,
+      });
     } catch (error) {
       console.error("Error in UpdateContent:", error);
       return callback(GrpcResponse.error("Error in UpdateContent."));
@@ -108,7 +98,7 @@ const contentService = {
 
       await sql`DELETE FROM ${table_name} WHERE id = ${content_id} AND user_id = ${req_user_id}`;
 
-      return callback(null, GrpcResponse.success(`${table_name} deleted.`));
+      return callback(null, GrpcResponse.success("${table_name} deleted."));
     } catch (error) {
       console.error("Error in DeleteContent:", error);
       return callback(GrpcResponse.error("Error in DeleteContent."));

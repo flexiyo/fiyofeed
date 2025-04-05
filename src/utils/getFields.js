@@ -5,10 +5,13 @@ export const getFields = (req_fields) => {
     "media_key",
     "collabs",
     "created_at",
+    "caption",
+    "hashtags",
+    "track",
   ]);
 
   const defaultFields =
-    "c.id, c.user_id, c.media_key, c.collabs, c.created_at";
+    "c.id, c.user_id, c.media_key, c.collabs, c.created_at, c.caption, c.hashtags, c.track";
 
   if (!req_fields || !req_fields.length) return defaultFields;
 

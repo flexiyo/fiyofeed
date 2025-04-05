@@ -8,6 +8,8 @@ const feedService = {
     try {
       const { req_user_id, table_name } = call.request;
 
+      console.log(call.request);
+
       let feedContentIds = await rdb(
         "get",
         `feed:${req_user_id}:${table_name}`
@@ -17,11 +19,11 @@ const feedService = {
         feedContentIds = await getStarterFeed(req_user_id, table_name);
       }
 
-      if(feedContentIds.length <= 5) {
+      if (feedContentIds.length <= 5) {
         precomputeFeed(req_user_id, table_name);
       }
 
-      const contents = [];
+      let contents = [];
 
       for (const contentId of feedContentIds) {
         const content = await getContentById(contentId, table_name);
@@ -33,15 +35,21 @@ const feedService = {
         }
       }
 
+      console.log(contents.length)
+
+      if(contents.length < 0) {
+        return callback(null, GrpcResponse.error("Contents not found."))
+      }
+
       return callback(null, {
-        ...GrpcResponse.success(`${table_name.slice(0, -1)} found.`),
+        ...GrpcResponse.success("Contents found."),
         contents,
       });
     } catch (error) {
       console.error("Error in GetUserFeed:", error);
       return callback(GrpcResponse.error("Error in GetUserFeed."));
     }
-  }
+  },
 };
 
 export default feedService;
